@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cyber Pocket Synth</title>
+<script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.js"></script>
+
+<style>
+html,body{margin:0;background:#000;color:#9fdfff;font-family:system-ui;height:100%}
+.app{display:flex;flex-direction:column;height:100vh}
+
+/* NAV */
+.nav{display:flex;background:#08121a}
+.navbtn{flex:1;padding:12px;border:1px solid #004c55;background:#08121a;color:#7fdfff}
+.navbtn.on{background:#00eaff;color:#002}
+
+/* PAGE */
+.pages{flex:1;position:relative}
+.page{position:absolute;inset:0;display:none;overflow-y:auto;padding:10px}
+.page.active{display:block}
+
+/* CONTROL BUTTONS */
+.hwbtn{background:#0b1320;border:1px solid #004c55;border-radius:6px;padding:10px;margin:5px;color:#9fdfff}
+.hwbtn.active{background:#00eaff;color:#002}
+.hwbtn.flash{background:#fff;color:#000}
+
+/* STEPS 16固定グリッド */
+.steps{
+display:grid;
+grid-template-columns:repeat(16,1fr);
+gap:4px;
+margin-top:8px;
+}
+.step{
+height:22px;
+background:#021018;
+border-radius:4px;
+}
+.step.active{background:#fff}
+.step.rec{background:#00c8ff}
+
+/* KEYS */
+.keys{
+display:grid;
+grid-template-columns:repeat(4,1fr);
+gap:6px;
+margin-top:12px;
+}
+.key{
+height:70px;
+background:linear-gradient(#e8faff,#cde8ff);
+border:1px solid #7fbfff;
+display:flex;align-items:flex-end;justify-content:center;color:#003
+}
+.key.hit{background:#8be9ff}
+.key.rec{background:#00ffd0}
+
+/* VALUE BUTTONS */
+.valbtn{width:40px;height:40px;background:#0b1320;border:1px solid #004c55;border-radius:8px;color:#9fdfff}
+.valbtn:active{background:#00eaff;color:#002}
+.value{color:#00f6ff;font-weight:bold;padding:0 6px}
+</style>
+</head>
+
+<body>
+<div class="app">
+
+<div class="nav">
+<button class="navbtn on" data-page="play">PLAY</button>
+<button class="navbtn" data-page="sound">SOUND</button>
+<button class="navbtn" data-page="tempo">TEMPO</button>
+</div>
+
+<div class="pages">
+
+<div class="page active" id="page-play">
+<button class="hwbtn" id="play">PLAY</button>
+<button class="hwbtn" id="rec">REC</button>
+<button class="hwbtn" id="recstop">REC STOP</button>
+<button class="hwbtn" id="clear">CLEAR</button>
+
+<div class="steps" id="steps"></div>
+<div class="keys" id="keys"></div>
+</div>
+
+<div class="page" id="page-sound">
+DELAY <button class="valbtn" id="delayDown">−</button><span class="value" id="delayVal">0</span><button class="valbtn" id="delayUp">＋</button><br>
+REVERB <button class="valbtn" id="reverbDown">−</button><span class="value" id="reverbVal">0</span><button class="valbtn" id="reverbUp">＋</button><br>
+TONE <button class="valbtn" id="toneDown">−</button><span class="value" id="toneVal">5</span><button class="valbtn" id="toneUp">＋</button>
+</div>
+
+<div class="page" id="page-tempo">
+BPM <button class="valbtn" id="bpmDown">−</button><span class="value" id="bpmVal">120</span><button class="valbtn" id="bpmUp">＋</button>
+</div>
+
+</div>
+</div>
+
+<script>
+/* ===== ページ切替 ===== */
+document.querySelectorAll(".navbtn").forEach(btn=>{
+btn.onclick=()=>{
+document.querySelectorAll(".navbtn").forEach(b=>b.classList.remove("on"));
+btn.classList.add("on");
+document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+document.getElementById("page-"+btn.dataset.page).classList.add("active");
+};
+});
+
+/* ===== 中枢STORE ===== */
+const STORE={
+playing:false,
+rec:false,
+step:0,
+seq:new Array(16).fill(null),
+bpm:120,
+delay:0,
+reverb:0,
+tone:5
+};
+
+const watchers=[];
+function setState(k,v){STORE[k]=v;watchers.forEach(fn=>fn(k,v));}
+function watch(fn){watchers.push(fn);}
+
+/* ===== 音源 ===== */
+let started=false;
+async function wake(){if(!started){await Tone.start();started=true;}}
+
+const delay=new Tone.FeedbackDelay("8n",0);
+const reverb=new Tone.Reverb({decay:5,wet:0});
+const filter=new Tone.Filter(2400,"lowpass");
+const synth=new Tone.PolySynth(Tone.Synth).chain(delay,reverb,filter,Tone.Destination);
+
+/* ===== UI反映 ===== */
+watch((k,v)=>{
+if(k==="playing"){
+if(v){Tone.Transport.start();play.classList.add("active")}
+else{Tone.Transport.stop();play.classList.remove("active")}
+}
+if(k==="rec"){rec.classList.toggle("active",v)}
+if(k==="bpm"){Tone.Transport.bpm.value=v;bpmVal.textContent=v}
+if(k==="delay"){delay.wet.value=v/10;delayVal.textContent=v}
+if(k==="reverb"){reverb.wet.value=v/10;reverbVal.textContent=v}
+if(k==="tone"){filter.frequency.value=1500+v*300;toneVal.textContent=v}
+});
+
+/* ===== ボタン ===== */
+function flash(b){b.classList.add("flash");setTimeout(()=>b.classList.remove("flash"),150)}
+
+play.onclick=async()=>{await wake();setState("playing",!STORE.playing);}
+rec.onclick=()=>setState("rec",!STORE.rec);
+recstop.onclick=()=>{flash(recstop);setState("rec",false);}
+clear.onclick=()=>{flash(clear);STORE.seq.fill(null);updateSteps();}
+
+/* ===== BPM/FX ===== */
+bpmUp.onclick=()=>setState("bpm",Math.min(220,STORE.bpm+1));
+bpmDown.onclick=()=>setState("bpm",Math.max(50,STORE.bpm-1));
+delayUp.onclick=()=>setState("delay",Math.min(10,STORE.delay+1));
+delayDown.onclick=()=>setState("delay",Math.max(0,STORE.delay-1));
+reverbUp.onclick=()=>setState("reverb",Math.min(10,STORE.reverb+1));
+reverbDown.onclick=()=>setState("reverb",Math.max(0,STORE.reverb-1));
+toneUp.onclick=()=>setState("tone",Math.min(10,STORE.tone+1));
+toneDown.onclick=()=>setState("tone",Math.max(0,STORE.tone-1));
+
+/* ===== ステップ描画 ===== */
+function updateSteps(){
+document.querySelectorAll(".step").forEach((s,i)=>{
+s.className="step";
+if(STORE.seq[i])s.classList.add("rec");
+if(i===STORE.step)s.classList.add("active");
+});
+}
+
+/* ===== シーケンサー ===== */
+Tone.Transport.scheduleRepeat(time=>{
+if(!STORE.playing)return;
+const note=STORE.seq[STORE.step];
+if(note)synth.triggerAttackRelease(note,"16n",time);
+STORE.step=(STORE.step+1)%16;
+updateSteps();
+},"16n");
+
+/* ===== キー入力 ===== */
+function playNote(note,el){
+synth.triggerAttackRelease(note,"8n");
+if(STORE.rec)STORE.seq[STORE.step]=note;
+el.classList.add(STORE.rec?"rec":"hit");
+setTimeout(()=>el.classList.remove("rec","hit"),120);
+}
+
+/* ===== UI生成 ===== */
+for(let i=0;i<16;i++){let d=document.createElement("div");d.className="step";steps.appendChild(d);}
+["C4","D4","E4","F4","G4","A4","B4","C5"].forEach(n=>{
+let k=document.createElement("div");
+k.className="key";k.innerText=n;
+k.onpointerdown=()=>{wake();playNote(n,k);}
+keys.appendChild(k);
+});
+</script>
+
+<script>
+/* ===============================
+   STATIC JAPAN CITY (ABSOLUTE CALM)
+   点滅なし / ネオンなし / 光変化なし
+   雨と反射のみ
+================================ */
+
+(function(){
+
+const wait = setInterval(()=>{
+const target = document.getElementById("keys");
+if(!target) return;
+clearInterval(wait);
+
+/* 背景追加 */
+const wrap = document.createElement("div");
+wrap.style.height="160px";
+wrap.style.marginTop="12px";
+wrap.style.borderTop="1px solid #004c55";
+wrap.style.background="#000";
+wrap.style.overflow="hidden";
+
+const canvas = document.createElement("canvas");
+canvas.style.width="100%";
+canvas.style.height="100%";
+canvas.style.imageRendering="pixelated";
+wrap.appendChild(canvas);
+
+target.after(wrap);
+
+const ctx = canvas.getContext("2d");
+
+function resize(){
+canvas.width = canvas.clientWidth;
+canvas.height = canvas.clientHeight;
+}
+resize();
+window.addEventListener("resize",resize);
+
+/* 雨 */
+const rain = Array.from({length:70},()=>({
+x:Math.random(),
+y:Math.random(),
+s:0.2+Math.random()*0.8
+}));
+
+let t=0;
+
+/* ===== 描画 ===== */
+function draw(){
+
+const w=canvas.width;
+const h=canvas.height;
+const ground=h*0.68;
+
+/* 残像（雨のためだけ） */
+ctx.fillStyle="rgba(0,0,0,0.35)";
+ctx.fillRect(0,0,w,h);
+
+/* 空 */
+ctx.fillStyle="#0a0f18";
+ctx.fillRect(0,0,w,ground);
+
+/* 地面 */
+ctx.fillStyle="#06080c";
+ctx.fillRect(0,ground,w,h);
+
+/* 建物（完全固定） */
+for(let i=0;i<w;i+=72){
+
+let ht=70+Math.sin(i*0.09)*18;
+
+ctx.fillStyle="#141c2b";
+ctx.fillRect(i,ground-ht,64,ht);
+
+/* 窓（固定色） */
+ctx.fillStyle="#1b2d3f";
+for(let y=ground-ht+10;y<ground-12;y+=14){
+ctx.fillRect(i+10,y,7,7);
+ctx.fillRect(i+28,y,7,7);
+ctx.fillRect(i+46,y,7,7);
+}
+}
+
+/* 雨のみアニメ */
+ctx.strokeStyle="rgba(140,200,255,0.45)";
+rain.forEach(r=>{
+ctx.beginPath();
+ctx.moveTo(r.x*w,r.y*h);
+ctx.lineTo(r.x*w,r.y*h+7*r.s);
+ctx.stroke();
+r.y+=0.008*r.s;
+if(r.y>1) r.y=0;
+});
+
+/* 水面反射（ゆらぎ極小） */
+ctx.globalAlpha=0.16;
+ctx.drawImage(canvas,0,0,w,ground,0,ground,w,h-ground);
+ctx.globalAlpha=1;
+
+t++;
+requestAnimationFrame(draw);
+}
+draw();
+
+},50);
+
+})();
+</script>
+
+<script>
+/* =====================================================
+   SAFE ADDON : KEY TRANSPOSE + OSC MORPH
+   既存コード非破壊拡張
+===================================================== */
+(function(){
+
+/* ---------------- KEY SYSTEM ---------------- */
+
+const ROOTS=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+let currentRoot=0;
+const MAJOR=[0,2,4,5,7,9,11,12];
+
+/* UI */
+const keyBtn=document.createElement("button");
+keyBtn.className="hwbtn";
+keyBtn.style.marginBottom="6px";
+document.getElementById("page-play")
+.insertBefore(keyBtn,document.getElementById("steps"));
+
+function degreeToNote(deg){
+const rootMidi=Tone.Frequency(ROOTS[currentRoot]+"4").toMidi();
+return Tone.Frequency(rootMidi+MAJOR[deg],"midi").toNote();
+}
+
+function noteToDegree(note){
+const midi=Tone.Frequency(note).toMidi();
+const rootMidi=Tone.Frequency(ROOTS[currentRoot]+"4").toMidi();
+let diff=(midi-rootMidi+120)%12;
+return MAJOR.findIndex(v=>v%12===diff);
+}
+
+/* seqの中身を度数化 */
+for(let i=0;i<STORE.seq.length;i++){
+if(typeof STORE.seq[i]==="string"){
+STORE.seq[i]=noteToDegree(STORE.seq[i]);
+}
+}
+
+/* 鍵盤再生成 */
+function rebuildKeys(){
+keyBtn.textContent="KEY "+ROOTS[currentRoot];
+const wrap=document.getElementById("keys");
+wrap.innerHTML="";
+
+MAJOR.forEach((_,deg)=>{
+const note=degreeToNote(deg);
+const k=document.createElement("div");
+k.className="key";
+k.innerText=note;
+
+k.onpointerdown=()=>{
+wake();
+playNote(note,k);
+if(STORE.rec) STORE.seq[STORE.step]=deg;
+};
+
+wrap.appendChild(k);
+});
+}
+
+keyBtn.onclick=()=>{
+currentRoot=(currentRoot+1)%ROOTS.length;
+rebuildKeys();
+};
+
+rebuildKeys();
+
+/* -------- 再生だけ差し替え -------- */
+
+const originalTrigger=synth.triggerAttackRelease.bind(synth);
+
+synth.triggerAttackRelease=function(note,len,time){
+
+if(typeof note==="number") note=degreeToNote(note);
+return originalTrigger(note,len,time);
+};
+
+/* ---------------- OSC MORPH ---------------- */
+
+const soundPage=document.getElementById("page-sound");
+
+const oscUI=document.createElement("div");
+oscUI.innerHTML=`
+OSC
+<button class="valbtn" id="oscDown">−</button>
+<span class="value" id="oscVal">0</span>
+<button class="valbtn" id="oscUp">＋</button>
+`;
+oscUI.style.marginTop="14px";
+soundPage.appendChild(oscUI);
+
+let osc=0;
+
+function applyOsc(v){
+osc=v;
+oscVal.textContent=v;
+
+/* 倍音量でモーフ（安全） */
+const harm=[
+{type:"sine",w:10-v},
+{type:"triangle",w:Math.max(0,5-Math.abs(v-3))},
+{type:"square",w:Math.max(0,5-Math.abs(v-7))},
+{type:"sawtooth",w:v}
+];
+
+const type=harm.sort((a,b)=>b.w-a.w)[0].type;
+synth.set({oscillator:{type}});
+}
+
+oscUp.onclick=()=>{if(osc<10)applyOsc(osc+1);}
+oscDown.onclick=()=>{if(osc>0)applyOsc(osc-1);}
+applyOsc(0);
+
+})();
+</script>
+
+<script>
+/* =========================================================
+   SAFE SOUND EXPANSION MODULE
+   非破壊サウンド拡張
+========================================================= */
+(function(){
+
+/* ===== エフェクトチェーン追加（安全） ===== */
+
+const drive = new Tone.Distortion(0);
+const chorus = new Tone.Chorus(4,2.5,0).start();
+const crusher = new Tone.BitCrusher(16);
+
+/* synthの後ろに差し込む（元チェーン保持） */
+synth.disconnect();
+synth.chain(delay,reverb,filter,drive,chorus,crusher,Tone.Destination);
+
+/* ===== UI作成 ===== */
+
+const soundPage=document.getElementById("page-sound");
+
+function makeRow(label,id){
+
+const row=document.createElement("div");
+row.style.marginTop="12px";
+
+row.innerHTML=`
+${label}
+<button class="valbtn" id="${id}Down">−</button>
+<span class="value" id="${id}Val">0</span>
+<button class="valbtn" id="${id}Up">＋</button>
+`;
+
+soundPage.appendChild(row);
+}
+
+makeRow("ATTACK","atk");
+makeRow("RELEASE","rel");
+makeRow("DRIVE","drv");
+makeRow("CHORUS","cho");
+makeRow("FILTER RES","res");
+makeRow("BIT CRUSH","bit");
+
+/* ===== 値管理 ===== */
+
+const val={
+atk:0,rel:0,drv:0,cho:0,res:0,bit:0
+};
+
+function clamp(v){return Math.max(0,Math.min(10,v));}
+
+function update(id){
+
+document.getElementById(id+"Val").textContent=val[id];
+
+/* 反映処理 */
+switch(id){
+
+case "atk":
+synth.set({envelope:{attack:0.001+val.atk*0.05}});
+break;
+
+case "rel":
+synth.set({envelope:{release:0.05+val.rel*0.25}});
+break;
+
+case "drv":
+drive.distortion=val.drv/10;
+break;
+
+case "cho":
+chorus.wet.value=val.cho/10;
+break;
+
+case "res":
+filter.Q.value=0.1+val.res*2.5;
+break;
+
+case "bit":
+crusher.bits=16-Math.floor(val.bit*1.2);
+break;
+}
+}
+
+/* ===== ボタン接続 ===== */
+
+Object.keys(val).forEach(id=>{
+
+document.getElementById(id+"Up").onclick=()=>{
+val[id]=clamp(val[id]+1);
+update(id);
+};
+
+document.getElementById(id+"Down").onclick=()=>{
+val[id]=clamp(val[id]-1);
+update(id);
+};
+
+update(id);
+});
+
+})();
+</script>
+
+<script>
+
+</body>
+</html>
