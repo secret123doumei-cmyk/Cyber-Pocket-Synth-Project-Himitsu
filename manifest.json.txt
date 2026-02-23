@@ -1,0 +1,12 @@
+{
+  "background_color": "#360505",
+  "dir": "ltr",
+  "display": "standalone",
+  "name": "Cyber Pocket Synth — Project Himitsu",
+  "orientation": "any",
+  "scope": "/",
+  "short_name": "CPS Himitsu",
+  "start_url": "/",
+  "theme_color": "#ffffff",
+  "description": "Pocket step sequencer synth for late-night sound sketching."
+}
