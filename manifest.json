@@ -10,3 +10,15 @@
   "theme_color": "#ffffff",
   "description": "Pocket step sequencer synth for late-night sound sketching."
 }
+"icons": [
+  {
+    "src": "cps192.png",
+    "sizes": "192x192",
+    "type": "image/png"
+  },
+  {
+    "src": "cps512.png",
+    "sizes": "512x512",
+    "type": "image/png"
+  }
+]
